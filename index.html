@@ -355,6 +355,10 @@
             const [copySuccess, setCopySuccess] = useState(false);
             const [connectionError, setConnectionError] = useState('');
 
+            // Rematch state
+            const [iWantRematch, setIWantRematch] = useState(false);
+            const [opponentWantsRematch, setOpponentWantsRematch] = useState(false);
+
             const startGame = (mode = 'cpu') => {
                 player1.reset();
                 player2.reset();
@@ -373,6 +377,8 @@
             const startNewMatch = (mode, bestOfValue) => {
                 setBestOf(bestOfValue);
                 setMatchScore({ p1: 0, p2: 0 });
+                setIWantRematch(false);
+                setOpponentWantsRematch(false);
                 startGame(mode);
             };
 
@@ -384,7 +390,10 @@
                     return null;
                 }
 
-                const SERVER_URL = 'http://localhost:3001';
+                // Use same URL as the page for production, localhost for development
+                const SERVER_URL = window.location.hostname === 'localhost'
+                    ? 'http://localhost:3001'
+                    : window.location.origin;
 
                 try {
                     socket = window.io(SERVER_URL);
@@ -446,6 +455,23 @@
                         setConnectionError(message);
                     });
 
+                    socket.on('opponentWantsRematch', () => {
+                        console.log('🔄 Opponent wants rematch!');
+                        setOpponentWantsRematch(true);
+                    });
+
+                    socket.on('opponentCancelledRematch', () => {
+                        console.log('❌ Opponent cancelled rematch');
+                        setOpponentWantsRematch(false);
+                    });
+
+                    socket.on('rematchAccepted', () => {
+                        console.log('✅ Both players want rematch! Starting new game...');
+                        setIWantRematch(false);
+                        setOpponentWantsRematch(false);
+                        startNewMatch('online', bestOf);
+                    });
+
                     return socket;
                 } catch (err) {
                     setConnectionError('Failed to initialize connection');
@@ -464,6 +490,24 @@
                 setWaitingForOpponent(false);
                 setOpponentName('');
                 setConnectionError('');
+                setIWantRematch(false);
+                setOpponentWantsRematch(false);
+            };
+
+            const requestRematch = () => {
+                if (socket && gameMode === 'online') {
+                    setIWantRematch(true);
+                    socket.emit('requestRematch');
+                    console.log('🔄 Requested rematch');
+                }
+            };
+
+            const cancelRematch = () => {
+                if (socket && gameMode === 'online') {
+                    setIWantRematch(false);
+                    socket.emit('cancelRematch');
+                    console.log('❌ Cancelled rematch request');
+                }
             };
 
             const createLobby = (bestOfValue) => {
@@ -604,18 +648,33 @@
                         setWinner(roundWinner);
 
                         const newScore = { ...matchScore };
-                        if (roundWinner.id === 1) newScore.p1++;
-                        else newScore.p2++;
+                        // In online mode, score tracking needs to be consistent
+                        // Host sees player1 as themselves, guest sees player2 as themselves
+                        if (gameMode === 'online') {
+                            if (isHost) {
+                                // Host perspective: player1 = me, player2 = opponent
+                                if (player1.hp <= 0) newScore.p2++; // opponent won
+                                else newScore.p1++; // I won
+                            } else {
+                                // Guest perspective: player2 = me, player1 = opponent
+                                if (player2.hp <= 0) newScore.p1++; // opponent won
+                                else newScore.p2++; // I won
+                            }
+                        } else {
+                            // CPU and local modes: use player ID
+                            if (roundWinner.id === 1) newScore.p1++;
+                            else newScore.p2++;
+                        }
                         setMatchScore(newScore);
 
                         if (bestOf === 1) {
                             setGameState('matchOver');
-                            if (gameMode === 'online') cleanupSocket();
+                            // Don't cleanup socket - allow rematch in online mode
                         } else {
                             const winsNeeded = Math.ceil(bestOf / 2);
                             if (newScore.p1 >= winsNeeded || newScore.p2 >= winsNeeded) {
                                 setGameState('matchOver');
-                                if (gameMode === 'online') cleanupSocket();
+                                // Don't cleanup socket - allow rematch in online mode
                             } else {
                                 setGameState('roundOver');
                             }
@@ -1005,6 +1064,7 @@
 
             if (gameState === 'matchOver') {
                 const matchWinner = matchScore.p1 > matchScore.p2 ? player1 : player2;
+                console.log('🏆 Match Over Screen - gameMode:', gameMode, 'isHost:', isHost, 'opponentName:', opponentName);
                 return (
                     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
                         <div className="max-w-md w-full bg-slate-800 rounded-2xl shadow-2xl p-8 border border-purple-500/30 text-center">
@@ -1025,18 +1085,68 @@
                                 </div>
                             )}
 
-                            <button
-                                onClick={() => startNewMatch(gameMode, bestOf)}
-                                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-4 px-8 rounded-xl transition-all transform hover:scale-105 shadow-lg mb-3"
-                            >
-                                Rematch
-                            </button>
-                            <button
-                                onClick={() => setGameState('menu')}
-                                className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-8 rounded-xl transition-all"
-                            >
-                                Main Menu
-                            </button>
+                            {/* Online mode - Play Again with rematch confirmation */}
+                            {gameMode === 'online' ? (
+                                <>
+                                    {opponentWantsRematch && (
+                                        <div className="bg-green-900/50 border-2 border-green-500 rounded-xl p-4 mb-4 text-green-200">
+                                            <p className="font-bold text-lg">{opponentName} wants to play again!</p>
+                                        </div>
+                                    )}
+
+                                    {!iWantRematch ? (
+                                        <button
+                                            onClick={requestRematch}
+                                            className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold py-4 px-8 rounded-xl transition-all transform hover:scale-105 shadow-lg mb-3"
+                                        >
+                                            Play Again with {opponentName}
+                                        </button>
+                                    ) : (
+                                        <>
+                                            <div className="bg-yellow-900/50 border-2 border-yellow-500 rounded-xl p-4 mb-4">
+                                                <p className="font-bold text-yellow-200 mb-2">Waiting for {opponentName}...</p>
+                                                <div className="animate-pulse flex justify-center">
+                                                    <div className="w-3 h-3 bg-yellow-400 rounded-full mx-1"></div>
+                                                    <div className="w-3 h-3 bg-yellow-400 rounded-full mx-1"></div>
+                                                    <div className="w-3 h-3 bg-yellow-400 rounded-full mx-1"></div>
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={cancelRematch}
+                                                className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-8 rounded-xl transition-all mb-3"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </>
+                                    )}
+
+                                    <button
+                                        onClick={() => {
+                                            cleanupSocket();
+                                            setGameState('menu');
+                                        }}
+                                        className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-8 rounded-xl transition-all"
+                                    >
+                                        Leave to Menu
+                                    </button>
+                                </>
+                            ) : (
+                                /* CPU and Local modes - original rematch button */
+                                <>
+                                    <button
+                                        onClick={() => startNewMatch(gameMode, bestOf)}
+                                        className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-4 px-8 rounded-xl transition-all transform hover:scale-105 shadow-lg mb-3"
+                                    >
+                                        Rematch
+                                    </button>
+                                    <button
+                                        onClick={() => setGameState('menu')}
+                                        className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-8 rounded-xl transition-all"
+                                    >
+                                        Main Menu
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </div>
                 );

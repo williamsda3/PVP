@@ -2,9 +2,13 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
 app.use(cors());
+
+// Serve static files (index.html)
+app.use(express.static(path.join(__dirname)));
 
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -37,7 +41,9 @@ io.on('connection', (socket) => {
       hostName: playerName,
       guest: null,
       guestName: null,
-      bestOf
+      bestOf,
+      hostWantsRematch: false,
+      guestWantsRematch: false
     });
     socket.join(code);
     socket.emit('lobbyCreated', { code });
@@ -91,6 +97,66 @@ io.on('connection', (socket) => {
         
         // Send move to opponent
         io.to(opponentId).emit('opponentMove', { move });
+        break;
+      }
+    }
+  });
+
+  socket.on('requestRematch', () => {
+    console.log(`🔄 Rematch requested by ${socket.id}`);
+    
+    // Find which lobby this socket is in
+    for (const [code, lobby] of lobbies.entries()) {
+      if (lobby.host === socket.id || lobby.guest === socket.id) {
+        const isHost = lobby.host === socket.id;
+        const opponentId = isHost ? lobby.guest : lobby.host;
+        
+        // Mark this player as wanting rematch
+        if (isHost) {
+          lobby.hostWantsRematch = true;
+        } else {
+          lobby.guestWantsRematch = true;
+        }
+        
+        console.log(`   Lobby ${code} rematch status: Host=${lobby.hostWantsRematch}, Guest=${lobby.guestWantsRematch}`);
+        
+        // Notify opponent that this player wants rematch
+        io.to(opponentId).emit('opponentWantsRematch');
+        
+        // If both want rematch, start new game
+        if (lobby.hostWantsRematch && lobby.guestWantsRematch) {
+          console.log(`   ✅ Both players ready! Starting rematch in ${code}`);
+          
+          // Reset rematch flags
+          lobby.hostWantsRematch = false;
+          lobby.guestWantsRematch = false;
+          
+          // Notify both players to start new game
+          io.to(code).emit('rematchAccepted');
+        }
+        break;
+      }
+    }
+  });
+
+  socket.on('cancelRematch', () => {
+    console.log(`❌ Rematch cancelled by ${socket.id}`);
+    
+    // Find which lobby this socket is in
+    for (const [code, lobby] of lobbies.entries()) {
+      if (lobby.host === socket.id || lobby.guest === socket.id) {
+        const isHost = lobby.host === socket.id;
+        const opponentId = isHost ? lobby.guest : lobby.host;
+        
+        // Mark this player as NOT wanting rematch
+        if (isHost) {
+          lobby.hostWantsRematch = false;
+        } else {
+          lobby.guestWantsRematch = false;
+        }
+        
+        // Notify opponent
+        io.to(opponentId).emit('opponentCancelledRematch');
         break;
       }
     }
