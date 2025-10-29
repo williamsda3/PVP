@@ -4,9 +4,9 @@ A strategic turn-based fighting game with local and online multiplayer support.
 
 ## Project Structure
 
-This project has been refactored into a modular architecture for better maintainability and scalability.
+The backend has been refactored into a clean modular architecture for better maintainability, debugging, and scalability.
 
-### Backend Structure (`/server`)
+### Backend Structure (`/server`) ✅ Fully Modularized
 
 ```
 server/
@@ -19,41 +19,38 @@ server/
 ```
 
 **Key Backend Modules:**
-- **LobbyManager**: Handles lobby creation, player joining, and lobby lifecycle
-- **SocketEvents**: Manages all real-time multiplayer communication
+- **LobbyManager**: Handles lobby creation, player joining, rematch logic, and lobby lifecycle
+- **SocketEvents**: Manages all real-time multiplayer communication events
 - **CodeGenerator**: Generates unique 4-letter lobby codes
 
-### Frontend Structure (`/public`)
+**Benefits of Modular Backend:**
+- Each module has a single responsibility
+- Error stack traces point to specific files (e.g., `lobbyManager.js:45`)
+- Easy to test individual components
+- Simple to extend (add tournaments, rankings, etc.)
+
+### Frontend Structure
 
 ```
-public/
-├── index.html               # Main HTML entry (backwards compatible)
-├── css/
-│   └── animations.css       # Combat animations and visual effects
-└── js/
-    ├── game-engine/         # Core game logic (modular, ready for future use)
-    │   ├── Player.js
-    │   ├── CombatResolver.js
-    │   ├── AI.js
-    │   └── constants.js
-    ├── components/          # UI components (modular, ready for future use)
-    │   └── Icons.js
-    └── utils/              # Helper utilities (modular, ready for future use)
-        ├── styleHelpers.js
-        └── socketManager.js
+/
+├── index.html               # Main game (monolithic for simplicity)
+└── public/
+    ├── css/
+    │   └── animations.css   # Extracted combat animations
+    └── js/                  # Reserved for future modularization
 ```
 
-**Frontend Modules (prepared for future migration):**
-- **Game Engine**: Player, CombatResolver, AI classes
-- **Constants**: MOVES, GAME_STATES, GAME_MODES enums
-- **Style Helpers**: Tailwind CSS class generators
-- **Socket Manager**: Multiplayer connection manager
+**Frontend Status:**
+- Currently monolithic (all React code in index.html)
+- CSS animations extracted for cleaner code
+- Works seamlessly with CDN-based React
+- Ready for future React build tooling migration
 
 ### Root Files
 
-- `index.html` - Main game interface (uses external CSS)
-- `server.js` - Legacy server file (kept for reference, use `server/index.js`)
-- `package.json` - Updated to use `server/index.js`
+- `index.html` - Main game interface (all React code, references external CSS)
+- `server.js` - Legacy server file (kept for reference)
+- `package.json` - Updated to use modular `server/index.js`
 
 ## Running the Application
 
@@ -79,35 +76,44 @@ The application is configured to work seamlessly on Render:
 2. **vs Friend (Local)** - Hot-seat multiplayer on same device
 3. **vs Friend (Online)** - Real-time multiplayer via Socket.io
 
-## Benefits of Modular Structure
+## Benefits of Backend Modularization
 
 ### For Debugging
-- Error stack traces now point to specific files and line numbers
-- Easier to isolate and test individual components
-- Cleaner console logs with module names
+- Error stack traces show specific files: `lobbyManager.js:45` instead of `server.js:45`
+- Each module handles one concern - easier to isolate bugs
+- Cleaner console logs showing which module logged what
 
 ### For Scaling
-- Each module has a single responsibility
-- Easy to add new features without touching unrelated code
-- Game engine can be extracted to NPM package if needed
+- Adding tournaments? Create `server/socket/tournamentManager.js`
+- Adding leaderboards? Create `server/socket/rankingManager.js`
+- Adding chat? Create `server/socket/chatManager.js`
+- Each feature is self-contained and doesn't touch other code
 
 ### For Team Development
-- Multiple developers can work on different modules simultaneously
-- Clear separation of concerns (backend logic, game engine, UI)
-- Easier code reviews with smaller, focused files
+- Multiple developers can work on different socket events without conflicts
+- Clear ownership: lobby logic lives in `lobbyManager.js`, that's it
+- Smaller files = faster code reviews
 
 ### For Testing
-- Unit tests can be written for individual modules
-- Game logic (Player, CombatResolver, AI) is isolated and testable
-- Mock socket connections for integration tests
+- Each module can be unit tested independently
+- Mock dependencies easily (inject fake lobby manager into socket events)
+- Integration tests can test specific flows
 
 ## Future Improvements
 
-The modular game engine and components in `/public/js` are ready for:
-- Migration to a full React app with build tooling (Vite/CRA)
-- TypeScript conversion for type safety
+### Frontend Modularization (When Ready)
+When you're ready to adopt a build process (Vite/Webpack):
+- Migrate to ES6 modules with proper bundling
+- Extract game engine (Player, CombatResolver, AI) into separate files
+- Component-based architecture
+- TypeScript for type safety
+
+### Other Potential Enhancements
 - Unit test suite with Jest/Vitest
-- Component-based architecture using ES6 modules
+- CI/CD with GitHub Actions
+- Database integration for persistent lobbies
+- Spectator mode
+- Replay system
 
 ## Tech Stack
 
