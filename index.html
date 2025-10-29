@@ -9,7 +9,33 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/public/css/animations.css">
+    <style>
+        @keyframes damageFloat {
+            0% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(0.5);
+            }
+            50% {
+                opacity: 1;
+                transform: translate(-50%, -70%) scale(1.2);
+            }
+            100% {
+                opacity: 0;
+                transform: translate(-50%, -100%) scale(0.8);
+            }
+        }
+
+        @keyframes healthPulse {
+            0%, 100% {
+                color: rgb(239, 68, 68);
+                text-shadow: 0 0 10px rgba(239, 68, 68, 0.8);
+            }
+            50% {
+                color: rgb(220, 38, 38);
+                text-shadow: 0 0 20px rgba(239, 68, 68, 1);
+            }
+        }
+    </style>
 </head>
 <body>
     <div id="root"></div>
