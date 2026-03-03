@@ -327,6 +327,7 @@
         function CombatGame() {
             const [player1] = useState(() => new Player(1, 'Player'));
             const [player2] = useState(() => new Player(2, 'CPU'));
+            const [playerName, setPlayerName] = useState('');
             const [resolver] = useState(() => new CombatResolver());
 
             const [gameState, setGameState] = useState('menu');
@@ -349,6 +350,7 @@
             const [joinCode, setJoinCode] = useState('');
             const [isHost, setIsHost] = useState(false);
             const isHostRef = useRef(false); // Ref to always have current value
+            const bestOfRef = useRef(3);
             const [waitingForOpponent, setWaitingForOpponent] = useState(false);
             const [opponentName, setOpponentName] = useState('');
             const [connected, setConnected] = useState(false);
@@ -362,6 +364,13 @@
             const startGame = (mode = 'cpu') => {
                 player1.reset();
                 player2.reset();
+                if (mode === 'cpu') {
+                    player1.name = playerName || 'Player';
+                    player2.name = 'CPU';
+                } else if (mode === 'local') {
+                    player1.name = 'Player 1';
+                    player2.name = 'Player 2';
+                }
                 setP1Move(null);
                 setP2Move(null);
                 setResult(null);
@@ -376,6 +385,7 @@
 
             const startNewMatch = (mode, bestOfValue) => {
                 setBestOf(bestOfValue);
+                bestOfRef.current = bestOfValue;
                 setMatchScore({ p1: 0, p2: 0 });
                 setIWantRematch(false);
                 setOpponentWantsRematch(false);
@@ -420,6 +430,7 @@
                         console.log('👥 Opponent joined! Name:', name, 'I am host:', isHostRef.current);
                         setOpponentName(name);
                         setWaitingForOpponent(false);
+                        player1.name = 'You';
                         player2.name = name;
                         startGame('online');
                     });
@@ -428,9 +439,10 @@
                         console.log('🎯 Lobby joined! isHost:', host);
                         setOpponentName(name);
                         setIsHost(host);
-                        isHostRef.current = host; // Update ref immediately
-                        player2.name = host ? 'You' : name;
-                        player1.name = host ? name : 'You';
+                        isHostRef.current = host;
+                        // Guest: player1 = opponent (host), player2 = me
+                        player1.name = name;
+                        player2.name = 'You';
                         startGame('online');
                     });
 
@@ -469,7 +481,7 @@
                         console.log('✅ Both players want rematch! Starting new game...');
                         setIWantRematch(false);
                         setOpponentWantsRematch(false);
-                        startNewMatch('online', bestOf);
+                        startNewMatch('online', bestOfRef.current);
                     });
 
                     return socket;
@@ -523,14 +535,15 @@
                     return;
                 }
 
+                const myName = playerName || 'Player 1';
                 if (!s.connected) {
                     setConnectionError('Connecting to server...');
                     s.once('connect', () => {
-                        s.emit('createLobby', { playerName: 'Player 1', bestOf: bestOfValue });
+                        s.emit('createLobby', { playerName: myName, bestOf: bestOfValue });
                         setGameState('lobby');
                     });
                 } else {
-                    s.emit('createLobby', { playerName: 'Player 1', bestOf: bestOfValue });
+                    s.emit('createLobby', { playerName: myName, bestOf: bestOfValue });
                     setGameState('lobby');
                 }
             };
@@ -544,9 +557,10 @@
                 setGameMode('online');
                 setIsHost(false);
                 isHostRef.current = false; // Set ref immediately
+                const myName = playerName || 'Player 2';
                 const s = initSocket();
                 if (s) {
-                    s.emit('joinLobby', { code: joinCode.toUpperCase(), playerName: 'Player 2' });
+                    s.emit('joinLobby', { code: joinCode.toUpperCase(), playerName: myName });
                     setGameState('lobby');
                 }
             };
@@ -558,15 +572,19 @@
             };
 
             useEffect(() => {
-                if (gameMode === 'online' && p1Move && p2Move && !result) {
+                if ((gameMode === 'online' || gameMode === 'local') && p1Move && p2Move && !result) {
                     setTimeout(() => resolveCombat(p1Move, p2Move), 800);
                 }
             }, [p1Move, p2Move, gameMode]);
 
-            // Keep ref in sync with state
+            // Keep refs in sync with state
             useEffect(() => {
                 isHostRef.current = isHost;
             }, [isHost]);
+
+            useEffect(() => {
+                bestOfRef.current = bestOf;
+            }, [bestOf]);
 
             const makeMove = (move, playerNum = 1) => {
                 if (gameState !== 'playing') return;
@@ -588,11 +606,8 @@
                 if (gameMode === 'local') {
                     if (playerNum === 1 && !p1Move) {
                         setP1Move(move);
-                        setCurrentTurn(2);
-                    } else if (playerNum === 2 && !p2Move && p1Move) {
+                    } else if (playerNum === 2 && !p2Move) {
                         setP2Move(move);
-                        setCurrentTurn(null);
-                        setTimeout(() => resolveCombat(p1Move, move), 800);
                     }
                     return;
                 }
@@ -701,22 +716,28 @@
                         if (!isHost && p2Move) return;
                     }
                     if (gameMode === 'local') {
-                        if (currentTurn === 1 && p1Move) return;
-                        if (currentTurn === 2 && p2Move) return;
+                        // Both players can pick simultaneously
+                        if (!p1Move) {
+                            if (e.key.toLowerCase() === 'w') makeMove(MOVES.ATTACK, 1);
+                            if (e.key.toLowerCase() === 'a' && player1.blockCount < 2) makeMove(MOVES.DEFEND, 1);
+                            if (e.key.toLowerCase() === 'd') makeMove(MOVES.CHARGE, 1);
+                        }
+                        if (!p2Move) {
+                            if (['ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
+                            if (e.key === 'ArrowUp') makeMove(MOVES.ATTACK, 2);
+                            if (e.key === 'ArrowLeft' && player2.blockCount < 2) makeMove(MOVES.DEFEND, 2);
+                            if (e.key === 'ArrowRight') makeMove(MOVES.CHARGE, 2);
+                        }
+                        return;
                     }
 
-                    if (currentTurn === 1 || gameMode === 'cpu' || (gameMode === 'online' && isHost)) {
+                    if (gameMode === 'cpu' || (gameMode === 'online' && isHost)) {
                         if (e.key.toLowerCase() === 'w') makeMove(MOVES.ATTACK, 1);
                         if (e.key.toLowerCase() === 'a' && player1.blockCount < 2) makeMove(MOVES.DEFEND, 1);
                         if (e.key.toLowerCase() === 'd') makeMove(MOVES.CHARGE, 1);
                     }
-
-                    if (gameMode === 'local' && currentTurn === 2) {
-                        if (e.key === 'ArrowUp') makeMove(MOVES.ATTACK, 2);
-                        if (e.key === 'ArrowLeft' && player2.blockCount < 2) makeMove(MOVES.DEFEND, 2);
-                        if (e.key === 'ArrowRight') makeMove(MOVES.CHARGE, 2);
-                    }
                     if (gameMode === 'online' && !isHost) {
+                        if (['ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
                         if (e.key === 'ArrowUp') makeMove(MOVES.ATTACK, 2);
                         if (e.key === 'ArrowLeft' && player2.blockCount < 2) makeMove(MOVES.DEFEND, 2);
                         if (e.key === 'ArrowRight') makeMove(MOVES.CHARGE, 2);
@@ -763,6 +784,18 @@
                             </div>
 
                             <div className="space-y-4 mb-8">
+                                <div className="bg-slate-700 rounded-xl p-4">
+                                    <label className="block text-slate-300 mb-2 font-semibold text-center">Your Name</label>
+                                    <input
+                                        type="text"
+                                        value={playerName}
+                                        onChange={(e) => setPlayerName(e.target.value)}
+                                        placeholder="Enter your name..."
+                                        maxLength={16}
+                                        className="w-full bg-slate-800 text-white text-center rounded-lg p-3 border-2 border-slate-600 focus:border-purple-500 focus:outline-none"
+                                    />
+                                </div>
+
                                 {connectionError && (
                                     <div className="bg-red-900/50 border-2 border-red-500 rounded-xl p-4 text-red-200">
                                         <p className="font-bold mb-2">� Connection Error</p>
@@ -1043,10 +1076,16 @@
 
                             <div className="bg-slate-700 rounded-xl p-4 mb-6">
                                 <h3 className="text-white font-bold mb-2">Match Score</h3>
-                                <div className="flex justify-center gap-8 text-3xl font-bold">
-                                    <div className="text-purple-400">{matchScore.p1}</div>
+                                <div className="flex justify-center items-center gap-6 text-3xl font-bold">
+                                    <div className="text-center">
+                                        <div className="text-sm text-slate-400 font-normal mb-1">{player1.name}</div>
+                                        <div className="text-purple-400">{matchScore.p1}</div>
+                                    </div>
                                     <div className="text-slate-500">-</div>
-                                    <div className="text-cyan-400">{matchScore.p2}</div>
+                                    <div className="text-center">
+                                        <div className="text-sm text-slate-400 font-normal mb-1">{player2.name}</div>
+                                        <div className="text-cyan-400">{matchScore.p2}</div>
+                                    </div>
                                 </div>
                                 <p className="text-slate-400 text-sm mt-2">First to {Math.ceil(bestOf / 2)} wins</p>
                             </div>
@@ -1070,17 +1109,28 @@
                         <div className="max-w-md w-full bg-slate-800 rounded-2xl shadow-2xl p-8 border border-purple-500/30 text-center">
                             <Trophy className="w-24 h-24 mx-auto mb-6 text-yellow-400" />
                             <h2 className="text-4xl font-bold text-white mb-4">
-                                {matchWinner.id === 1 ? 'Victory!' : gameMode === 'local' ? 'Player 2 Wins!' : 'Defeat'}
+                                {gameMode === 'local'
+                                    ? `${matchWinner.name} Wins!`
+                                    : gameMode === 'online'
+                                        ? (matchWinner.name === 'You' ? 'Victory!' : 'Defeat')
+                                        : (matchWinner.id === 1 ? 'Victory!' : 'Defeat')
+                                }
                             </h2>
                             <p className="text-2xl text-slate-300 mb-6">{matchWinner.name} wins the match!</p>
 
                             {bestOf > 1 && (
                                 <div className="bg-slate-700 rounded-xl p-4 mb-6">
                                     <h3 className="text-white font-bold mb-2">Final Score</h3>
-                                    <div className="flex justify-center gap-8 text-4xl font-bold">
-                                        <div className="text-purple-400">{matchScore.p1}</div>
+                                    <div className="flex justify-center items-center gap-6 text-4xl font-bold">
+                                        <div className="text-center">
+                                            <div className="text-sm text-slate-400 font-normal mb-1">{player1.name}</div>
+                                            <div className="text-purple-400">{matchScore.p1}</div>
+                                        </div>
                                         <div className="text-slate-500">-</div>
-                                        <div className="text-cyan-400">{matchScore.p2}</div>
+                                        <div className="text-center">
+                                            <div className="text-sm text-slate-400 font-normal mb-1">{player2.name}</div>
+                                            <div className="text-cyan-400">{matchScore.p2}</div>
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -1217,15 +1267,30 @@
                                         </div>
                                     )}
 
-                                    {gameMode === 'local' && p1Move && !p2Move && (
-                                        <div className="bg-slate-700 rounded-lg p-4 text-center text-green-400 font-bold">
-                                             Move Locked In
+                                    {gameMode === 'local' && p1Move && !p2Move && !result && (
+                                        <div className="bg-green-900/30 border border-green-500/50 rounded-lg p-4 text-center text-green-400 font-bold flex items-center justify-center gap-2">
+                                            <Check className="w-5 h-5" />
+                                            Ready
+                                        </div>
+                                    )}
+
+                                    {gameMode === 'online' && !isHost && p1Move && !p2Move && (
+                                        <div className="bg-green-900/30 border border-green-500/50 rounded-lg p-4 text-center text-green-400 font-bold flex items-center justify-center gap-2">
+                                            <Check className="w-5 h-5" />
+                                            Opponent Ready
+                                        </div>
+                                    )}
+
+                                    {gameMode === 'online' && !isHost && !p1Move && p2Move && (
+                                        <div className="bg-slate-700 rounded-lg p-4 text-center text-yellow-400 font-bold animate-pulse">
+                                            Waiting...
                                         </div>
                                     )}
 
                                     {gameMode === 'online' && p1Move && !p2Move && isHost && (
-                                        <div className="bg-slate-700 rounded-lg p-4 text-center text-green-400 font-bold">
-                                             Move Locked In
+                                        <div className="bg-green-900/30 border border-green-500/50 rounded-lg p-4 text-center text-green-400 font-bold flex items-center justify-center gap-2">
+                                            <Check className="w-5 h-5" />
+                                            Move Locked In
                                         </div>
                                     )}
                                 </div>
@@ -1311,7 +1376,7 @@
                                         </div>
                                     </div>
 
-                                    {p2Move && (gameMode === 'cpu' || (gameMode === 'local' && p1Move) || (gameMode === 'online' && p1Move)) ? (
+                                    {p2Move && (gameMode === 'cpu' || (gameMode === 'local' && p1Move && p2Move) || (gameMode === 'online' && p1Move)) ? (
                                         <div className={`${getMoveColor(p2Move)} rounded-lg p-4 flex items-center justify-center text-white font-bold`}>
                                             {getMoveIcon(p2Move)}
                                             <span className="ml-2 uppercase">{p2Move}</span>
@@ -1320,13 +1385,24 @@
                                         <div className="bg-slate-700 rounded-lg p-4 text-center text-slate-400">
                                             Thinking...
                                         </div>
-                                    ) : gameMode === 'local' && p2Move && !p1Move ? (
-                                        <div className="bg-slate-700 rounded-lg p-4 text-center text-green-400 font-bold">
-                                             Move Locked In
+                                    ) : gameMode === 'local' && p2Move && !p1Move && !result ? (
+                                        <div className="bg-green-900/30 border border-green-500/50 rounded-lg p-4 text-center text-green-400 font-bold flex items-center justify-center gap-2">
+                                            <Check className="w-5 h-5" />
+                                            Ready
                                         </div>
                                     ) : gameMode === 'online' && p2Move && !p1Move && !isHost ? (
-                                        <div className="bg-slate-700 rounded-lg p-4 text-center text-green-400 font-bold">
-                                             Move Locked In
+                                        <div className="bg-green-900/30 border border-green-500/50 rounded-lg p-4 text-center text-green-400 font-bold flex items-center justify-center gap-2">
+                                            <Check className="w-5 h-5" />
+                                            Move Locked In
+                                        </div>
+                                    ) : gameMode === 'online' && isHost && p2Move && !p1Move ? (
+                                        <div className="bg-green-900/30 border border-green-500/50 rounded-lg p-4 text-center text-green-400 font-bold flex items-center justify-center gap-2">
+                                            <Check className="w-5 h-5" />
+                                            Opponent Ready
+                                        </div>
+                                    ) : gameMode === 'online' && isHost && !p2Move && p1Move ? (
+                                        <div className="bg-slate-700 rounded-lg p-4 text-center text-yellow-400 font-bold animate-pulse">
+                                            Waiting...
                                         </div>
                                     ) : null}
                                 </div>
@@ -1408,50 +1484,62 @@
                             </div>
                         )}
 
-                        {(gameMode === 'local' && currentTurn === 1 && !p1Move) && (
-                            <div>
-                                <p className="text-center text-purple-400 mb-3 font-semibold">
-                                    Player 1 - W/A/D
-                                </p>
-                                <div className="grid grid-cols-3 gap-4 max-w-3xl mx-auto">
-                                    <button onClick={() => makeMove(MOVES.ATTACK, 1)} className="bg-gradient-to-br from-red-600 to-red-800 hover:from-red-700 hover:to-red-900 text-white font-bold py-6 px-4 rounded-xl transition-all transform hover:scale-105 shadow-lg flex flex-col items-center gap-2">
-                                        <Swords className="w-10 h-10" />
-                                        <span className="text-lg">ATTACK</span>
-                                    </button>
-
-                                    <button onClick={() => makeMove(MOVES.DEFEND, 1)} disabled={player1.blockCount >= 2} className={`${player1.blockCount >= 2 ? 'bg-gray-600 cursor-not-allowed opacity-50' : 'bg-gradient-to-br from-blue-600 to-blue-800 hover:from-blue-700 hover:to-blue-900'} text-white font-bold py-6 px-4 rounded-xl transition-all transform ${player1.blockCount >= 2 ? '' : 'hover:scale-105'} shadow-lg flex flex-col items-center gap-2`}>
-                                        <Shield className="w-10 h-10" />
-                                        <span className="text-lg">DEFEND</span>
-                                    </button>
-
-                                    <button onClick={() => makeMove(MOVES.CHARGE, 1)} className="bg-gradient-to-br from-yellow-500 to-yellow-700 hover:from-yellow-600 hover:to-yellow-800 text-white font-bold py-6 px-4 rounded-xl transition-all transform hover:scale-105 shadow-lg flex flex-col items-center gap-2">
-                                        <Zap className="w-10 h-10" />
-                                        <span className="text-lg">CHARGE</span>
-                                    </button>
+                        {gameMode === 'local' && (!p1Move || !p2Move) && !result && (
+                            <div className="grid grid-cols-2 gap-8 max-w-5xl mx-auto">
+                                {/* Player 1 panel */}
+                                <div>
+                                    <p className="text-center text-purple-400 mb-3 font-semibold">
+                                        Player 1 - W/A/D
+                                    </p>
+                                    {!p1Move ? (
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <button onClick={() => makeMove(MOVES.ATTACK, 1)} className="bg-gradient-to-br from-red-600 to-red-800 hover:from-red-700 hover:to-red-900 text-white font-bold py-5 px-3 rounded-xl transition-all transform hover:scale-105 shadow-lg flex flex-col items-center gap-2">
+                                                <Swords className="w-8 h-8" />
+                                                <span>ATTACK</span>
+                                            </button>
+                                            <button onClick={() => makeMove(MOVES.DEFEND, 1)} disabled={player1.blockCount >= 2} className={`${player1.blockCount >= 2 ? 'bg-gray-600 cursor-not-allowed opacity-50' : 'bg-gradient-to-br from-blue-600 to-blue-800 hover:from-blue-700 hover:to-blue-900'} text-white font-bold py-5 px-3 rounded-xl transition-all transform ${player1.blockCount >= 2 ? '' : 'hover:scale-105'} shadow-lg flex flex-col items-center gap-2`}>
+                                                <Shield className="w-8 h-8" />
+                                                <span>DEFEND</span>
+                                            </button>
+                                            <button onClick={() => makeMove(MOVES.CHARGE, 1)} className="bg-gradient-to-br from-yellow-500 to-yellow-700 hover:from-yellow-600 hover:to-yellow-800 text-white font-bold py-5 px-3 rounded-xl transition-all transform hover:scale-105 shadow-lg flex flex-col items-center gap-2">
+                                                <Zap className="w-8 h-8" />
+                                                <span>CHARGE</span>
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-green-900/50 border-2 border-green-500 rounded-xl p-6 text-center animate-pulse">
+                                            <Check className="w-10 h-10 text-green-400 mx-auto mb-2" />
+                                            <p className="text-green-400 font-bold text-lg">Ready!</p>
+                                        </div>
+                                    )}
                                 </div>
-                            </div>
-                        )}
 
-                        {(gameMode === 'local' && currentTurn === 2 && !p2Move) && (
-                            <div>
-                                <p className="text-center text-cyan-400 mb-3 font-semibold">
-                                    Player 2 - Arrow Keys
-                                </p>
-                                <div className="grid grid-cols-3 gap-4 max-w-3xl mx-auto">
-                                    <button onClick={() => makeMove(MOVES.ATTACK, 2)} className="bg-gradient-to-br from-red-600 to-red-800 hover:from-red-700 hover:to-red-900 text-white font-bold py-6 px-4 rounded-xl transition-all transform hover:scale-105 shadow-lg flex flex-col items-center gap-2">
-                                        <Swords className="w-10 h-10" />
-                                        <span className="text-lg">ATTACK</span>
-                                    </button>
-
-                                    <button onClick={() => makeMove(MOVES.DEFEND, 2)} disabled={player2.blockCount >= 2} className={`${player2.blockCount >= 2 ? 'bg-gray-600 cursor-not-allowed opacity-50' : 'bg-gradient-to-br from-blue-600 to-blue-800 hover:from-blue-700 hover:to-blue-900'} text-white font-bold py-6 px-4 rounded-xl transition-all transform ${player2.blockCount >= 2 ? '' : 'hover:scale-105'} shadow-lg flex flex-col items-center gap-2`}>
-                                        <Shield className="w-10 h-10" />
-                                        <span className="text-lg">DEFEND</span>
-                                    </button>
-
-                                    <button onClick={() => makeMove(MOVES.CHARGE, 2)} className="bg-gradient-to-br from-yellow-500 to-yellow-700 hover:from-yellow-600 hover:to-yellow-800 text-white font-bold py-6 px-4 rounded-xl transition-all transform hover:scale-105 shadow-lg flex flex-col items-center gap-2">
-                                        <Zap className="w-10 h-10" />
-                                        <span className="text-lg">CHARGE</span>
-                                    </button>
+                                {/* Player 2 panel */}
+                                <div>
+                                    <p className="text-center text-cyan-400 mb-3 font-semibold">
+                                        Player 2 - Arrow Keys
+                                    </p>
+                                    {!p2Move ? (
+                                        <div className="grid grid-cols-3 gap-3">
+                                            <button onClick={() => makeMove(MOVES.ATTACK, 2)} className="bg-gradient-to-br from-red-600 to-red-800 hover:from-red-700 hover:to-red-900 text-white font-bold py-5 px-3 rounded-xl transition-all transform hover:scale-105 shadow-lg flex flex-col items-center gap-2">
+                                                <Swords className="w-8 h-8" />
+                                                <span>ATTACK</span>
+                                            </button>
+                                            <button onClick={() => makeMove(MOVES.DEFEND, 2)} disabled={player2.blockCount >= 2} className={`${player2.blockCount >= 2 ? 'bg-gray-600 cursor-not-allowed opacity-50' : 'bg-gradient-to-br from-blue-600 to-blue-800 hover:from-blue-700 hover:to-blue-900'} text-white font-bold py-5 px-3 rounded-xl transition-all transform ${player2.blockCount >= 2 ? '' : 'hover:scale-105'} shadow-lg flex flex-col items-center gap-2`}>
+                                                <Shield className="w-8 h-8" />
+                                                <span>DEFEND</span>
+                                            </button>
+                                            <button onClick={() => makeMove(MOVES.CHARGE, 2)} className="bg-gradient-to-br from-yellow-500 to-yellow-700 hover:from-yellow-600 hover:to-yellow-800 text-white font-bold py-5 px-3 rounded-xl transition-all transform hover:scale-105 shadow-lg flex flex-col items-center gap-2">
+                                                <Zap className="w-8 h-8" />
+                                                <span>CHARGE</span>
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-green-900/50 border-2 border-green-500 rounded-xl p-6 text-center animate-pulse">
+                                            <Check className="w-10 h-10 text-green-400 mx-auto mb-2" />
+                                            <p className="text-green-400 font-bold text-lg">Ready!</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -1499,9 +1587,9 @@
                             </div>
                         )}
 
-                        {(gameMode === 'local' && ((currentTurn === 1 && p1Move) || (currentTurn === 2 && p2Move))) && (
+                        {gameMode === 'local' && p1Move && p2Move && !result && (
                             <div className="text-center">
-                                <p className="text-slate-300 text-lg">Move locked in! Other player's turn...</p>
+                                <p className="text-slate-300 text-lg animate-pulse">Both players ready! Resolving...</p>
                             </div>
                         )}
                     </div>
